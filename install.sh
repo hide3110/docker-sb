@@ -1,40 +1,42 @@
 #!/bin/sh
-
-# sing-box 一键安装脚本
+# sing-box 一键安装脚本 (POSIX 兼容版)
 # 适用于 Debian/Ubuntu 和 Alpine 系统
-# 兼容 bash 和 ash
 
 set -e
 
 # 默认配置变量
-AL_PORTS=${AL_PORTS:-"64031-64036"}
-RE_PORT=${RE_PORT:-"443"}
-AL_DOMAIN=${AL_DOMAIN:-"us01.yyds.nyc.mn"}
-RE_SNI=${RE_SNI:-"www.cityofrc.us"}
-SB_VER=${SB_VER:-"v1.11.15"}
+: "${AL_PORTS:=64031-64036}"
+: "${RE_PORT:=443}"
+: "${AL_DOMAIN:=us01.yyds.nyc.mn}"
+: "${RE_SNI:=www.cityofrc.us}"
+: "${SB_VER:=v1.11.15}"
 
 # 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+RED="$(printf '\033[0;31m')"
+GREEN="$(printf '\033[0;32m')"
+YELLOW="$(printf '\033[1;33m')"
+NC="$(printf '\033[0m')"
+
+# 记录 docker compose 调用方式
+COMPOSE_CMD=""
 
 # 日志函数
 log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    printf '%b[INFO]%b %s\n' "$GREEN" "$NC" "$1"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    printf '%b[WARN]%b %s\n' "$YELLOW" "$NC" "$1"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    printf '%b[ERROR]%b %s\n' "$RED" "$NC" "$1"
 }
 
 # 检测系统类型
 detect_os() {
     if [ -f /etc/os-release ]; then
+        # shellcheck source=/dev/null
         . /etc/os-release
         OS=$ID
     elif [ -f /etc/alpine-release ]; then
@@ -48,7 +50,7 @@ detect_os() {
 
 # 检查 Docker 是否已安装
 check_docker() {
-    if command -v docker &> /dev/null; then
+    if command -v docker >/dev/null 2>&1; then
         log_info "Docker 已安装: $(docker --version)"
         return 0
     else
@@ -59,11 +61,13 @@ check_docker() {
 
 # 检查 Docker Compose 是否已安装
 check_docker_compose() {
-    if docker compose version &> /dev/null; then
+    if docker compose version >/dev/null 2>&1; then
         log_info "Docker Compose 已安装: $(docker compose version)"
+        COMPOSE_CMD="docker compose"
         return 0
-    elif command -v docker-compose &> /dev/null; then
+    elif command -v docker-compose >/dev/null 2>&1; then
         log_info "Docker Compose 已安装: $(docker-compose --version)"
+        COMPOSE_CMD="docker-compose"
         return 0
     else
         log_warn "Docker Compose 未安装"
@@ -74,12 +78,9 @@ check_docker_compose() {
 # 安装 Docker (Debian/Ubuntu)
 install_docker_debian() {
     log_info "开始安装 Docker (Debian/Ubuntu)..."
-    curl -fsSL https://get.docker.com | bash -s docker
-    
-    # 启动 Docker
+    curl -fsSL https://get.docker.com | sh -s docker
     systemctl enable docker
     systemctl start docker
-    
     log_info "Docker 安装完成"
 }
 
@@ -87,11 +88,8 @@ install_docker_debian() {
 install_docker_alpine() {
     log_info "开始安装 Docker (Alpine)..."
     apk add docker docker-cli-compose
-    
-    # 启动 Docker
     rc-update add docker boot
     service docker start
-    
     log_info "Docker 安装完成"
 }
 
@@ -113,20 +111,47 @@ install_docker() {
 
 # 解析端口范围
 parse_ports() {
-    if [[ $AL_PORTS =~ ^([0-9]+)-([0-9]+)$ ]]; then
-        PORT_START=${BASH_REMATCH[1]}
-        PORT_END=${BASH_REMATCH[2]}
-        
-        PORT_SS=$PORT_START
-        PORT_TROJAN=$((PORT_START + 1))
-        PORT_VMESS=$((PORT_START + 2))
-        PORT_VLESS=$((PORT_START + 3))
-        PORT_TUIC=$((PORT_START + 4))
-        PORT_HYSTERIA2=$((PORT_START + 5))
-    else
-        log_error "端口范围格式错误，应为: 开始端口-结束端口 (如: 64031-64036)"
+    case "$AL_PORTS" in
+        *-*)
+            PORT_START=${AL_PORTS%-*}
+            PORT_END=${AL_PORTS#*-}
+            ;;
+        *)
+            log_error "端口范围格式错误，应为: 开始端口-结束端口 (如: 64031-64036)"
+            exit 1
+            ;;
+    esac
+
+    case $PORT_START in
+        ''|*[!0-9]*)
+            log_error "开始端口必须为数字"
+            exit 1
+            ;;
+    esac
+
+    case $PORT_END in
+        ''|*[!0-9]*)
+            log_error "结束端口必须为数字"
+            exit 1
+            ;;
+    esac
+
+    if [ "$PORT_START" -gt "$PORT_END" ]; then
+        log_error "端口范围错误: 开始端口大于结束端口"
         exit 1
     fi
+
+    if [ $((PORT_END - PORT_START)) -lt 5 ]; then
+        log_error "端口范围不足 6 个端口"
+        exit 1
+    fi
+
+    PORT_SS=$PORT_START
+    PORT_TROJAN=$((PORT_START + 1))
+    PORT_VMESS=$((PORT_START + 2))
+    PORT_VLESS=$((PORT_START + 3))
+    PORT_TUIC=$((PORT_START + 4))
+    PORT_HYSTERIA2=$((PORT_START + 5))
 }
 
 # 创建目录结构
@@ -163,7 +188,6 @@ create_config() {
     log_info "创建 config.json..."
     log_info "使用端口配置: SS=$PORT_SS, Trojan=$PORT_TROJAN, VMess=$PORT_VMESS, VLESS=$PORT_VLESS, TUIC=$PORT_TUIC, Hysteria2=$PORT_HYSTERIA2, Reality=$RE_PORT"
     log_info "使用域名: $AL_DOMAIN, Reality SNI: $RE_SNI"
-    
     cat > /opt/sing-box/config/config.json << EOF
 {
   "log": {
@@ -355,18 +379,18 @@ EOF
 # 启动容器
 start_container() {
     log_info "启动 sing-box 容器..."
-    cd /opt/sing-box
-    docker compose up -d
+    cd /opt/sing-box || exit 1
+    $COMPOSE_CMD up -d
     log_info "sing-box 容器已启动"
 }
 
 # 显示状态
 show_status() {
-    echo ""
+    printf '\n'
     log_info "========================================"
     log_info "sing-box 安装完成！"
     log_info "========================================"
-    echo ""
+    printf '\n'
     log_info "配置信息:"
     log_info "  - sing-box 版本: $SB_VER"
     log_info "  - Shadowsocks 端口: $PORT_SS"
@@ -378,52 +402,41 @@ show_status() {
     log_info "  - Reality 端口: $RE_PORT"
     log_info "  - ACME 域名: $AL_DOMAIN"
     log_info "  - Reality SNI: $RE_SNI"
-    echo ""
+    printf '\n'
     log_info "常用命令:"
     log_info "  - 查看日志: docker logs -f sing-box"
-    log_info "  - 停止容器: cd /opt/sing-box && docker compose down"
-    log_info "  - 重启容器: cd /opt/sing-box && docker compose restart"
+    log_info "  - 停止容器: cd /opt/sing-box && $COMPOSE_CMD down"
+    log_info "  - 重启容器: cd /opt/sing-box && $COMPOSE_CMD restart"
     log_info "  - 查看状态: docker ps | grep sing-box"
-    echo ""
+    printf '\n'
 }
 
 # 主函数
 main() {
-    echo ""
+    printf '\n'
     log_info "========================================"
     log_info "sing-box 一键安装脚本"
     log_info "========================================"
-    echo ""
-    
-    # 检测系统
+    printf '\n'
+
     detect_os
-    
-    # 检查 Docker
+
     if ! check_docker; then
         log_info "准备安装 Docker..."
         install_docker
     fi
-    
-    # 检查 Docker Compose
+
     if ! check_docker_compose; then
         log_error "Docker Compose 未安装，但应该随 Docker 一起安装"
         exit 1
     fi
-    
-    # 解析端口
+
     parse_ports
-    
-    # 创建目录和文件
     create_directories
     create_docker_compose
     create_config
-    
-    # 启动容器
     start_container
-    
-    # 显示状态
     show_status
 }
 
-# 运行主函数
 main
