@@ -10,6 +10,7 @@ AL_PORTS=${AL_PORTS:-"64031-64036"}
 RE_PORT=${RE_PORT:-"443"}
 AL_DOMAIN=${AL_DOMAIN:-"us01.yyds.nyc.mn"}
 RE_SNI=${RE_SNI:-"www.cityofrc.us"}
+SB_VER=${SB_VER:-"v1.11.15"}
 
 # 颜色定义
 RED='\033[0;31m'
@@ -138,10 +139,11 @@ create_directories() {
 # 创建 docker-compose.yml
 create_docker_compose() {
     log_info "创建 docker-compose.yml..."
-    cat > /opt/sing-box/docker-compose.yml << 'EOF'
+    log_info "使用 sing-box 版本: $SB_VER"
+    cat > /opt/sing-box/docker-compose.yml << EOF
 services:
   sing-box:
-    image: ghcr.io/sagernet/sing-box:v1.11.15
+    image: ghcr.io/sagernet/sing-box:$SB_VER
     container_name: sing-box
     restart: unless-stopped
     network_mode: host
@@ -365,6 +367,7 @@ show_status() {
     log_info "========================================"
     echo ""
     log_info "配置信息:"
+    log_info "  - sing-box 版本: $SB_VER"
     log_info "  - Shadowsocks 端口: $PORT_SS"
     log_info "  - Trojan 端口: $PORT_TROJAN"
     log_info "  - VMess 端口: $PORT_VMESS"
