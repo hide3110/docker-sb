@@ -9,7 +9,7 @@ set -e
 : "${RE_PORT:=443}"
 : "${AL_DOMAIN:=us01.yyds.nyc.mn}"
 : "${RE_SNI:=www.cityofrc.us}"
-: "${SB_VER:=v1.11.15}"
+: "${SB_VER:=v1.13.12}"
 
 # 颜色定义
 RED="$(printf '\033[0;31m')"
